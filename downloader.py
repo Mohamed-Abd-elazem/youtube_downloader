@@ -3,6 +3,7 @@ from tkinter import ttk
 import os
 import yt_dlp
 import threading
+import re
 
 class VideoDownloader:
     def __init__(self, master):
@@ -42,6 +43,9 @@ class VideoDownloader:
         self.video_count = 0
         self.current_video_index = 0
 
+    def sanitize_filename(self, name):
+        return re.sub(r'[^a-zA-Z0-9-_ ]', '_', name)
+
     def paste_playlist_url(self, event):
         self.playlist_url_entry.insert(tk.INSERT, self.master.clipboard_get())
         return "break"
@@ -62,17 +66,10 @@ class VideoDownloader:
             self.update_status("No path provided. Using the current directory.")
             save_path = os.getcwd()
 
-        if not os.path.exists(save_path):
-            try:
-                os.makedirs(save_path)
-            except Exception as e:
-                self.update_status(f"Error creating directory: {e}")
-                return
-
         self.update_status("Fetching playlist details...")
 
         try:
-            ydl_opts = {'quiet': True}
+            ydl_opts = {'quiet': True, 'extract_flat': False}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 playlist_info = ydl.extract_info(playlist_url, download=False)
         except Exception as e:
@@ -83,20 +80,24 @@ class VideoDownloader:
             self.update_status("The playlist is empty or invalid.")
             return
 
+        playlist_title = self.sanitize_filename(playlist_info.get('title', 'Playlist'))
+        playlist_folder = os.path.join(save_path, playlist_title)
+        os.makedirs(playlist_folder, exist_ok=True)
+
         video_entries = playlist_info['entries']
         self.video_count = len(video_entries)
         self.update_status(f"The playlist contains {self.video_count} videos. Starting download...")
 
         for index, entry in enumerate(video_entries, start=1):
             self.current_video_index = index
-            video_url = entry['url']
-            video_title = entry.get('title', f'video_{index}')
+            video_url = entry.get('url')
+            video_title = self.sanitize_filename(entry.get('title', f'video_{index}'))
             self.update_status(f"Downloading video {index}/{self.video_count}: {video_title}")
             self.update_video_info(entry)
 
             ydl_opts = {
                 'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
-                'outtmpl': os.path.join(save_path, f'{video_title}.%(ext)s'),
+                'outtmpl': os.path.join(playlist_folder, f'{video_title}.%(ext)s'),
                 'progress_hooks': [self.progress_hook],
             }
 

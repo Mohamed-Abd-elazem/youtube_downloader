@@ -20,7 +20,7 @@ class VideoDownloader:
         style.map("TButton", background=[("active", "#4f4f6f")])
         style.configure("TEntry", padding=6, font=("Segoe UI", 10))
         style.configure("TFrame", background="#1e1e2f")
-        style.configure("TProgressbar", thickness=18, troughcolor="#2e2e40", background="#00ff88") # التعديل هنا
+        style.configure("TProgressbar", thickness=18, troughcolor="#2e2e40", background="#00ff88")
 
         # Playlist URL
         self.playlist_url_label = ttk.Label(master, text="Playlist URL:")
@@ -50,18 +50,19 @@ class VideoDownloader:
 
         # Status Label
         self.status_label = tk.Label(master, text="", bg="#2e2e40", fg="#00ff88", font=("Segoe UI", 10), anchor="center")
-        self.status_label.pack(fill=tk.X, padx=20, pady=(5, 0))
+        self.status_label.pack_forget()
 
         # Progress Bar
         self.progress_bar = ttk.Progressbar(master, orient="horizontal", length=500, mode="determinate")
-        self.progress_bar.pack(pady=10)
+        self.progress_bar.pack_forget()
 
         # Video Info
         self.video_info_label = tk.Label(master, text="", bg="#2e2e40", fg="white", font=("Segoe UI", 10), justify="center")
-        self.video_info_label.pack(fill=tk.X, padx=20, pady=(5, 20))
+        self.video_info_label.pack_forget()
 
         self.video_count = 0
         self.current_video_index = 0
+        self.progress_bar_shown = False # متغير جديد لتتبع حالة ظهور شريط التحميل
 
     def sanitize_filename(self, name):
         return re.sub(r'[^a-zA-Z0-9-_ ]', '_', name)
@@ -132,7 +133,9 @@ class VideoDownloader:
                     self.update_status(f"Failed to download video {index}: {e}")
 
         self.update_status("All videos have been downloaded successfully!")
-        self.progress_bar["value"] = 0
+        self.progress_bar.pack_forget()
+        self.status_label.pack_forget()
+        self.progress_bar_shown = False # إعادة تعيين المتغير
 
     def progress_hook(self, d):
         if d['status'] == 'downloading':
@@ -146,10 +149,18 @@ class VideoDownloader:
         self.master.update_idletasks()
 
     def update_status(self, message):
+        if self.status_label.winfo_manager() != "pack":
+            self.status_label.pack(fill=tk.X, padx=20, pady=(5, 0))
         self.status_label.config(text=message)
         self.master.update_idletasks()
 
     def update_video_info(self, info):
+        if self.video_info_label.winfo_manager() != "pack":
+            self.video_info_label.pack(fill=tk.X, padx=20, pady=(5, 20))
+        # إظهار شريط التحميل هنا
+        if not self.progress_bar_shown:
+            self.progress_bar.pack(pady=10)
+            self.progress_bar_shown = True
         title = info.get('title', 'Unknown Title')
         filesize = info.get('filesize_approx', 0)
         resolution = info.get('resolution', 'Unknown')
@@ -165,6 +176,7 @@ class VideoDownloader:
     def start_download_thread(self):
         self.download_button.config(state="disabled")
         self.progress_bar["value"] = 0
+        # تم حذف self.progress_bar.pack(pady=10) من هنا
         thread = threading.Thread(target=self.download_playlist)
         thread.daemon = True
         thread.start()

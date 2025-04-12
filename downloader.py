@@ -4,71 +4,91 @@ import os
 import yt_dlp
 import threading
 import re
+import requests
+from PIL import Image, ImageTk
+from io import BytesIO
 
 class VideoDownloader:
     def __init__(self, master):
         self.master = master
         master.title("YouTube Playlist Downloader")
-        master.geometry("700x480")
+        master.geometry("800x450")
+        master.resizable(False, False) 
         master.configure(bg="#1e1e2f")
 
         style = ttk.Style()
         style.theme_use('clam')
 
-        style.configure("TLabel", background="#1e1e2f", foreground="#ffffff", font=("Segoe UI", 11))
-        style.configure("TButton", background="#3a3a4f", foreground="#ffffff", font=("Segoe UI", 10), padding=6)
+        style.configure("TLabel", background="#1e1e2f", foreground="#ffffff", font=("Segoe UI", 12)) # حجم الخط
+        style.configure("TButton", background="#3a3a4f", foreground="#ffffff", font=("Segoe UI", 11), padding=8) # حجم الخط و padding
         style.map("TButton", background=[("active", "#4f4f6f")])
-        style.configure("TEntry", padding=6, font=("Segoe UI", 10))
+        style.configure("TEntry", padding=8, font=("Segoe UI", 11))
         style.configure("TFrame", background="#1e1e2f")
-        style.configure("TProgressbar", thickness=18, troughcolor="#2e2e40", background="#00ff88")
+        style.configure("TProgressbar", thickness=20, troughcolor="#2e2e40", background="#00ff88") # thickness
 
         # Playlist URL
         self.playlist_url_label = ttk.Label(master, text="Playlist URL:")
-        self.playlist_url_label.pack(pady=(20, 5))
+        self.playlist_url_label.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="w")
 
         url_frame = ttk.Frame(master)
-        url_frame.pack(pady=5)
+        url_frame.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
 
-        self.playlist_url_entry = ttk.Entry(url_frame, width=62)
-        self.playlist_url_entry.pack(side=tk.LEFT, padx=(0, 5))
+        self.playlist_url_entry = ttk.Entry(url_frame, width=70)
+        self.playlist_url_entry.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
 
         self.paste_button = ttk.Button(url_frame, text="Paste", command=self.paste_playlist_url)
         self.paste_button.pack(side=tk.LEFT)
 
         # Save Path
         self.save_path_label = ttk.Label(master, text="Save Path:")
-        self.save_path_label.pack(pady=(15, 5))
+        self.save_path_label.grid(row=2, column=0, padx=20, pady=(15, 5), sticky="w")
 
         path_frame = ttk.Frame(master)
-        path_frame.pack(pady=5)
+        path_frame.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
 
-        self.save_path_entry = ttk.Entry(path_frame, width=62)
+        self.save_path_entry = ttk.Entry(path_frame, width=70)
         default_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
         self.save_path_entry.insert(0, default_downloads)
-        self.save_path_entry.pack(side=tk.LEFT, padx=(0, 5))
+        self.save_path_entry.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
 
         self.browse_button = ttk.Button(path_frame, text="Browse", command=self.browse_folder)
         self.browse_button.pack(side=tk.LEFT)
 
         # Download Button
         self.download_button = ttk.Button(master, text="Download", command=self.start_download_thread)
-        self.download_button.pack(pady=20)
+        self.download_button.grid(row=4, column=0, pady=20)
 
         # Status Label
-        self.status_label = tk.Label(master, text="", bg="#2e2e40", fg="#00ff88", font=("Segoe UI", 10), anchor="center")
-        self.status_label.pack_forget()
+        self.status_label = tk.Label(master, text="", bg="#2e2e40", fg="#00ff88", font=("Segoe UI", 11), anchor="center")
+        self.status_label.grid(row=5, column=0, sticky="ew", padx=20, pady=(5, 0))
+        self.status_label.grid_remove()
 
         # Progress Bar
-        self.progress_bar = ttk.Progressbar(master, orient="horizontal", length=500, mode="determinate")
-        self.progress_bar.pack_forget()
+        self.progress_bar = ttk.Progressbar(master, orient="horizontal", length=700, mode="determinate") # عرض اكبر
+        self.progress_bar.grid(row=6, column=0, pady=10, padx=20, sticky="ew")
+        self.progress_bar.grid_remove()
+
+        # Video Info Frame
+        self.video_info_frame = tk.Frame(master, bg="#2e2e40")
+        self.video_info_frame.grid(row=7, column=0, pady=(5, 20), padx=20, sticky="ew")
+        self.video_info_frame.grid_remove()
+
+        # Video Image
+        self.video_image_label = tk.Label(self.video_info_frame, bg="#2e2e40")
+        self.video_image_label.pack(side=tk.LEFT, padx=(0, 10))
 
         # Video Info
-        self.video_info_label = tk.Label(master, text="", bg="#2e2e40", fg="white", font=("Segoe UI", 10), justify="center")
-        self.video_info_label.pack_forget()
+        self.video_info_label = tk.Label(self.video_info_frame, text="", bg="#2e2e40", fg="white", font=("Segoe UI", 11), justify="left") # حجم الخط
+        self.video_info_label.pack(side=tk.LEFT)
 
         self.video_count = 0
         self.current_video_index = 0
         self.progress_bar_shown = False
+
+        master.columnconfigure(0, weight=1)
+        master.rowconfigure(7, weight=1)
+        url_frame.columnconfigure(0, weight=1)
+        path_frame.columnconfigure(0, weight=1)
 
     def sanitize_filename(self, name):
         return re.sub(r'[^a-zA-Z0-9-_ ]', '_', name)
@@ -100,7 +120,7 @@ class VideoDownloader:
         self.update_status("Fetching playlist details...")
 
         try:
-            ydl_opts = {'quiet': True, 'extract_flat': False}
+            ydl_opts = {'quiet': True}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 playlist_info = ydl.extract_info(playlist_url, download=False)
         except Exception as e:
@@ -127,6 +147,7 @@ class VideoDownloader:
             video_title = self.sanitize_filename(entry.get('title', f'video_{index}'))
             self.update_status(f"Downloading video {index}/{self.video_count}: {video_title}")
             self.update_video_info(entry)
+            self.update_video_image(entry)
 
             ydl_opts = {
                 'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
@@ -134,7 +155,6 @@ class VideoDownloader:
                 'progress_hooks': [self.progress_hook],
                 'quiet': True,
             }
-
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 try:
                     ydl.download([video_url])
@@ -142,8 +162,9 @@ class VideoDownloader:
                     self.update_status(f"Failed to download video {index}: {e}")
 
         self.update_status("All videos have been downloaded successfully!")
-        self.progress_bar.pack_forget()
-        self.status_label.pack_forget()
+        self.progress_bar.grid_remove()
+        self.status_label.grid_remove()
+        self.video_info_frame.grid_remove()
         self.progress_bar_shown = False
 
     def progress_hook(self, d):
@@ -158,16 +179,16 @@ class VideoDownloader:
         self.master.update_idletasks()
 
     def update_status(self, message):
-        if self.status_label.winfo_manager() != "pack":
-            self.status_label.pack(fill=tk.X, padx=20, pady=(5, 0))
+        if self.status_label.winfo_manager() != "grid":
+            self.status_label.grid(row=5, column=0, sticky="ew", padx=20, pady=(5, 0))
         self.status_label.config(text=message)
         self.master.update_idletasks()
 
     def update_video_info(self, info):
-        if self.video_info_label.winfo_manager() != "pack":
-            self.video_info_label.pack(fill=tk.X, padx=20, pady=(5, 20))
+        if self.video_info_frame.winfo_manager() != "grid":
+            self.video_info_frame.grid(row=7, column=0, pady=(5, 20), padx=20, sticky="ew")
         if not self.progress_bar_shown:
-            self.progress_bar.pack(pady=10)
+            self.progress_bar.grid(row=6, column=0, pady=10, padx=20, sticky="ew")
             self.progress_bar_shown = True
         title = info.get('title', 'Unknown Title')
         filesize = info.get('filesize_approx', 0)
@@ -179,6 +200,24 @@ class VideoDownloader:
         else:
             filesize_str = f"{filesize} B"
         self.video_info_label.config(text=f"Title: {title}\nSize: {filesize_str}\nResolution: {resolution}")
+        self.master.update_idletasks()
+
+    def update_video_image(self, info):
+        thumbnail_url = info.get('thumbnail')
+        if thumbnail_url:
+            try:
+                response = requests.get(thumbnail_url, stream=True)
+                response.raise_for_status()
+                image = Image.open(BytesIO(response.content))
+                image.thumbnail((120, 90))
+                photo = ImageTk.PhotoImage(image)
+                self.video_image_label.config(image=photo)
+                self.video_image_label.image = photo
+            except requests.exceptions.RequestException as e:
+                print(f"Error loading image: {e}")
+                self.video_image_label.config(image='')
+        else:
+            self.video_image_label.config(image='')
         self.master.update_idletasks()
 
     def start_download_thread(self):

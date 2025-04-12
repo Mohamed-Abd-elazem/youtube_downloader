@@ -20,7 +20,7 @@ class VideoDownloader:
         style.map("TButton", background=[("active", "#4f4f6f")])
         style.configure("TEntry", padding=6, font=("Segoe UI", 10))
         style.configure("TFrame", background="#1e1e2f")
-        style.configure("TProgressbar", thickness=18)
+        style.configure("TProgressbar", thickness=18, troughcolor="#2e2e40", background="#00ff88") # التعديل هنا
 
         # Playlist URL
         self.playlist_url_label = ttk.Label(master, text="Playlist URL:")

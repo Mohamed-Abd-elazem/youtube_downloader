@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
 import os
 import yt_dlp
 import threading
@@ -9,36 +9,56 @@ class VideoDownloader:
     def __init__(self, master):
         self.master = master
         master.title("YouTube Playlist Downloader")
+        master.geometry("700x480")
+        master.configure(bg="#1e1e2f")
+
+        style = ttk.Style()
+        style.theme_use('clam')
+
+        style.configure("TLabel", background="#1e1e2f", foreground="#ffffff", font=("Segoe UI", 11))
+        style.configure("TButton", background="#3a3a4f", foreground="#ffffff", font=("Segoe UI", 10), padding=6)
+        style.map("TButton", background=[("active", "#4f4f6f")])
+        style.configure("TEntry", padding=6, font=("Segoe UI", 10))
+        style.configure("TFrame", background="#1e1e2f")
+        style.configure("TProgressbar", thickness=18)
 
         # Playlist URL
         self.playlist_url_label = ttk.Label(master, text="Playlist URL:")
-        self.playlist_url_label.pack(pady=5)
-        self.playlist_url_entry = ttk.Entry(master, width=50)
+        self.playlist_url_label.pack(pady=(20, 5))
+        self.playlist_url_entry = ttk.Entry(master, width=80)
         self.playlist_url_entry.pack(pady=5)
         self.playlist_url_entry.bind("<Control-v>", self.paste_playlist_url)
 
         # Save Path
         self.save_path_label = ttk.Label(master, text="Save Path:")
-        self.save_path_label.pack(pady=5)
-        self.save_path_entry = ttk.Entry(master, width=50)
-        self.save_path_entry.pack(pady=5)
-        self.save_path_entry.bind("<Control-v>", self.paste_save_path)
+        self.save_path_label.pack(pady=(15, 5))
+
+        path_frame = ttk.Frame(master)
+        path_frame.pack(pady=5)
+
+        self.save_path_entry = ttk.Entry(path_frame, width=62)
+        default_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+        self.save_path_entry.insert(0, default_downloads)
+        self.save_path_entry.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.browse_button = ttk.Button(path_frame, text="Browse", command=self.browse_folder)
+        self.browse_button.pack(side=tk.LEFT)
 
         # Download Button
         self.download_button = ttk.Button(master, text="Download", command=self.start_download_thread)
-        self.download_button.pack(pady=10)
+        self.download_button.pack(pady=20)
 
         # Status Label
-        self.status_label = ttk.Label(master, text="")
-        self.status_label.pack(pady=5)
+        self.status_label = tk.Label(master, text="", bg="#2e2e40", fg="#00ff88", font=("Segoe UI", 10), anchor="center")
+        self.status_label.pack(fill=tk.X, padx=20, pady=(5, 0))
 
         # Progress Bar
-        self.progress_bar = ttk.Progressbar(master, orient="horizontal", length=300, mode="determinate")
+        self.progress_bar = ttk.Progressbar(master, orient="horizontal", length=500, mode="determinate")
         self.progress_bar.pack(pady=10)
 
-        # Video Info Label
-        self.video_info_label = ttk.Label(master, text="")
-        self.video_info_label.pack(pady=5)
+        # Video Info
+        self.video_info_label = tk.Label(master, text="", bg="#2e2e40", fg="white", font=("Segoe UI", 10), justify="center")
+        self.video_info_label.pack(fill=tk.X, padx=20, pady=(5, 20))
 
         self.video_count = 0
         self.current_video_index = 0
@@ -50,9 +70,11 @@ class VideoDownloader:
         self.playlist_url_entry.insert(tk.INSERT, self.master.clipboard_get())
         return "break"
 
-    def paste_save_path(self, event):
-        self.save_path_entry.insert(tk.INSERT, self.master.clipboard_get())
-        return "break"
+    def browse_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.save_path_entry.delete(0, tk.END)
+            self.save_path_entry.insert(0, folder)
 
     def download_playlist(self):
         playlist_url = self.playlist_url_entry.get().strip()
@@ -63,7 +85,6 @@ class VideoDownloader:
             return
 
         if not save_path:
-            self.update_status("No path provided. Using the current directory.")
             save_path = os.getcwd()
 
         self.update_status("Fetching playlist details...")
@@ -73,7 +94,7 @@ class VideoDownloader:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 playlist_info = ydl.extract_info(playlist_url, download=False)
         except Exception as e:
-            self.update_status(f"Error fetching playlist details: {e}")
+            self.update_status(f"Error fetching playlist: {e}")
             return
 
         if 'entries' not in playlist_info or not playlist_info['entries']:
@@ -86,11 +107,13 @@ class VideoDownloader:
 
         video_entries = playlist_info['entries']
         self.video_count = len(video_entries)
-        self.update_status(f"The playlist contains {self.video_count} videos. Starting download...")
+        self.update_status(f"Found {self.video_count} videos. Starting download...")
 
         for index, entry in enumerate(video_entries, start=1):
             self.current_video_index = index
-            video_url = entry.get('url')
+            video_id = entry.get('id')
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+
             video_title = self.sanitize_filename(entry.get('title', f'video_{index}'))
             self.update_status(f"Downloading video {index}/{self.video_count}: {video_title}")
             self.update_video_info(entry)
@@ -99,6 +122,7 @@ class VideoDownloader:
                 'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
                 'outtmpl': os.path.join(playlist_folder, f'{video_title}.%(ext)s'),
                 'progress_hooks': [self.progress_hook],
+                'quiet': True,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -141,10 +165,10 @@ class VideoDownloader:
     def start_download_thread(self):
         self.download_button.config(state="disabled")
         self.progress_bar["value"] = 0
-        download_thread = threading.Thread(target=self.download_playlist)
-        download_thread.daemon = True
-        download_thread.start()
-        self.master.after(100, self.check_thread, download_thread)
+        thread = threading.Thread(target=self.download_playlist)
+        thread.daemon = True
+        thread.start()
+        self.master.after(100, self.check_thread, thread)
 
     def check_thread(self, thread):
         if thread.is_alive():
@@ -154,5 +178,5 @@ class VideoDownloader:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    downloader = VideoDownloader(root)
+    app = VideoDownloader(root)
     root.mainloop()

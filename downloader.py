@@ -25,9 +25,15 @@ class VideoDownloader:
         # Playlist URL
         self.playlist_url_label = ttk.Label(master, text="Playlist URL:")
         self.playlist_url_label.pack(pady=(20, 5))
-        self.playlist_url_entry = ttk.Entry(master, width=80)
-        self.playlist_url_entry.pack(pady=5)
-        self.playlist_url_entry.bind("<Control-v>", self.paste_playlist_url)
+
+        url_frame = ttk.Frame(master)
+        url_frame.pack(pady=5)
+
+        self.playlist_url_entry = ttk.Entry(url_frame, width=62)
+        self.playlist_url_entry.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.paste_button = ttk.Button(url_frame, text="Paste", command=self.paste_playlist_url)
+        self.paste_button.pack(side=tk.LEFT)
 
         # Save Path
         self.save_path_label = ttk.Label(master, text="Save Path:")
@@ -62,14 +68,17 @@ class VideoDownloader:
 
         self.video_count = 0
         self.current_video_index = 0
-        self.progress_bar_shown = False # متغير جديد لتتبع حالة ظهور شريط التحميل
+        self.progress_bar_shown = False
 
     def sanitize_filename(self, name):
         return re.sub(r'[^a-zA-Z0-9-_ ]', '_', name)
 
-    def paste_playlist_url(self, event):
-        self.playlist_url_entry.insert(tk.INSERT, self.master.clipboard_get())
-        return "break"
+    def paste_playlist_url(self):
+        try:
+            text = self.master.clipboard_get()
+            self.playlist_url_entry.insert(tk.INSERT, text)
+        except tk.TclError:
+            pass
 
     def browse_folder(self):
         folder = filedialog.askdirectory()
@@ -135,7 +144,7 @@ class VideoDownloader:
         self.update_status("All videos have been downloaded successfully!")
         self.progress_bar.pack_forget()
         self.status_label.pack_forget()
-        self.progress_bar_shown = False # إعادة تعيين المتغير
+        self.progress_bar_shown = False
 
     def progress_hook(self, d):
         if d['status'] == 'downloading':
@@ -157,7 +166,6 @@ class VideoDownloader:
     def update_video_info(self, info):
         if self.video_info_label.winfo_manager() != "pack":
             self.video_info_label.pack(fill=tk.X, padx=20, pady=(5, 20))
-        # إظهار شريط التحميل هنا
         if not self.progress_bar_shown:
             self.progress_bar.pack(pady=10)
             self.progress_bar_shown = True
@@ -176,7 +184,6 @@ class VideoDownloader:
     def start_download_thread(self):
         self.download_button.config(state="disabled")
         self.progress_bar["value"] = 0
-        # تم حذف self.progress_bar.pack(pady=10) من هنا
         thread = threading.Thread(target=self.download_playlist)
         thread.daemon = True
         thread.start()

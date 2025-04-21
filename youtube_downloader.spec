@@ -6,7 +6,7 @@ from os import path
 block_cipher = None
 
 a = Analysis(
-    ['pyqt5.py'],
+    ['youtube_downloader.py'],
     pathex=[],
     binaries=[],
     datas=[],

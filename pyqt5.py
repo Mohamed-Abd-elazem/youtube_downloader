@@ -19,6 +19,12 @@ class VideoDownloader(QMainWindow):
         super().__init__()
         self.setWindowTitle("YouTube Downloader")
         self.setFixedSize(900, 500)
+        
+        # Add download control variables
+        self.is_downloading = False
+        self.download_thread = None
+        self.ydl = None
+        
         self.setup_ui()
         
         # Initialize variables
@@ -168,6 +174,29 @@ class VideoDownloader(QMainWindow):
             }
         """)
         
+    def update_download_button_state(self, is_downloading):
+        if is_downloading:
+            self.download_btn.setText("Cancel")
+            self.download_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ff4444;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 15px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #ff6666;
+                }
+                QPushButton:pressed {
+                    background-color: #cc0000;
+                }
+            """)
+        else:
+            self.download_btn.setText("Download")
+            self.download_btn.setStyleSheet("")  # Reset to default style
+        
     def paste_playlist_url(self):
         clipboard = QApplication.clipboard()
         self.url_entry.setText(clipboard.text())
@@ -201,19 +230,54 @@ class VideoDownloader(QMainWindow):
             return 'error', str(e)
         
     def start_download_thread(self):
-        self.download_btn.setEnabled(False)
+        if self.is_downloading:
+            # Stop the download
+            self.is_downloading = False
+            if self.ydl:
+                try:
+                    # Safely terminate the download
+                    self.ydl._finish_sequence = True
+                    self.ydl._cancel_download = True
+                    if self.download_thread and self.download_thread.is_alive():
+                        self.download_thread.join(timeout=1)
+                except:
+                    pass
+            self.status_signal.emit("Download cancelled.")
+            self.reset_ui()
+            return
+            
+        # Start new download
+        self.is_downloading = True
+        self.update_download_button_state(True)
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         
-        thread = threading.Thread(target=self.download_playlist)
-        thread.daemon = True
-        thread.start()
+        self.download_thread = threading.Thread(target=self.download_playlist)
+        self.download_thread.daemon = True
+        self.download_thread.start()
+
+    def reset_ui(self):
+        """Reset UI to initial state"""
+        self.is_downloading = False
+        self.update_download_button_state(False)
+        self.progress_bar.hide()
+        self.video_info_widget.hide()
+        self.status_label.clear()
+        self.download_btn.setEnabled(True)
+        self.url_entry.setEnabled(True)
+        self.path_entry.setEnabled(True)
+        self.browse_btn.setEnabled(True)
+        self.paste_btn.setEnabled(True)
+        self.ydl = None
 
     def download_single_video(self, video_url, save_path, index=1, total=1):
         """
         Helper function to download a single video
         """
         try:
+            if not self.is_downloading:
+                raise Exception("Download cancelled")
+                
             # Get video info
             with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
                 video_info = ydl.extract_info(video_url, download=False)
@@ -231,69 +295,84 @@ class VideoDownloader(QMainWindow):
             }
             
             # Download the video
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([video_url])
+            if self.is_downloading:
+                self.ydl = yt_dlp.YoutubeDL(ydl_opts)
+                self.ydl.download([video_url])
                 
         except Exception as e:
+            if str(e) == "Download cancelled":
+                raise
             self.status_signal.emit(f"Failed to download video {index}: {str(e)}")
             raise
         
     def download_playlist(self):
-        url = self.url_entry.text().strip()
-        save_path = self.path_entry.text().strip()
-        
-        if not url:
-            self.status_signal.emit("Please enter a URL.")
-            self.download_btn.setEnabled(True)
-            return
-            
-        if not save_path:
-            save_path = os.getcwd()
-            
-        self.status_signal.emit("Checking URL type...")
-        
-        # Check URL type
-        url_type, info = self.check_url_type(url)
-        
-        if url_type == 'error':
-            self.status_signal.emit(f"Error: {info}")
-            self.download_btn.setEnabled(True)
-            return
-        
         try:
-            if url_type == 'playlist':
-                # Download playlist
-                playlist_title = self.sanitize_filename(info.get('title', 'Playlist'))
-                download_path = os.path.join(save_path, playlist_title)
-                os.makedirs(download_path, exist_ok=True)
-                
-                video_entries = info['entries']
-                self.video_count = len(video_entries)
-                self.status_signal.emit(f"Found {self.video_count} videos in playlist. Starting download...")
-                
-                for index, entry in enumerate(video_entries, start=1):
-                    self.current_video_index = index
-                    video_id = entry.get('id')
-                    video_url = f"https://www.youtube.com/watch?v={video_id}"
-                    
-                    self.download_single_video(video_url, download_path, index, self.video_count)
-                    
-            else:  # video
-                # Download single video
-                self.video_count = 1
-                self.current_video_index = 1
-                self.status_signal.emit("Downloading single video...")
-                self.download_single_video(url, save_path, 1, 1)
-                
-            self.status_signal.emit("Download completed successfully!")
-            self.progress_bar.hide()
-            self.video_info_widget.hide()
+            # Disable UI elements during download
+            self.url_entry.setEnabled(False)
+            self.path_entry.setEnabled(False)
+            self.browse_btn.setEnabled(False)
+            self.paste_btn.setEnabled(False)
             
-        except Exception as e:
-            self.status_signal.emit(f"Error during download: {str(e)}")
-        
+            url = self.url_entry.text().strip()
+            save_path = self.path_entry.text().strip()
+            
+            if not url:
+                self.status_signal.emit("Please enter a URL.")
+                self.reset_ui()
+                return
+                
+            if not save_path:
+                save_path = os.getcwd()
+                
+            self.status_signal.emit("Checking URL type...")
+            
+            # Check URL type
+            url_type, info = self.check_url_type(url)
+            
+            if url_type == 'error':
+                self.status_signal.emit(f"Error: {info}")
+                self.reset_ui()
+                return
+            
+            try:
+                if url_type == 'playlist':
+                    # Download playlist
+                    playlist_title = self.sanitize_filename(info.get('title', 'Playlist'))
+                    download_path = os.path.join(save_path, playlist_title)
+                    os.makedirs(download_path, exist_ok=True)
+                    
+                    video_entries = info['entries']
+                    self.video_count = len(video_entries)
+                    self.status_signal.emit(f"Found {self.video_count} videos in playlist. Starting download...")
+                    
+                    for index, entry in enumerate(video_entries, start=1):
+                        if not self.is_downloading:
+                            raise Exception("Download cancelled")
+                            
+                        self.current_video_index = index
+                        video_id = entry.get('id')
+                        video_url = f"https://www.youtube.com/watch?v={video_id}"
+                        
+                        self.download_single_video(video_url, download_path, index, self.video_count)
+                        
+                else:  # video
+                    # Download single video
+                    self.video_count = 1
+                    self.current_video_index = 1
+                    self.status_signal.emit("Downloading single video...")
+                    self.download_single_video(url, save_path, 1, 1)
+                    
+                if self.is_downloading:
+                    self.status_signal.emit("Download completed successfully!")
+                    
+            except Exception as e:
+                if str(e) == "Download cancelled":
+                    self.status_signal.emit("Download cancelled.")
+                else:
+                    self.status_signal.emit(f"Error during download: {str(e)}")
+            
         finally:
-            self.download_btn.setEnabled(True)
+            self.reset_ui()
         
     def progress_hook(self, d):
         if d['status'] == 'downloading':

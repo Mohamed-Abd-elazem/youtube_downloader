@@ -17,7 +17,7 @@ class VideoDownloader(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("YouTube Playlist Downloader")
+        self.setWindowTitle("YouTube Downloader")
         self.setFixedSize(900, 500)
         self.setup_ui()
         
@@ -34,7 +34,7 @@ class VideoDownloader(QMainWindow):
         main_layout.setContentsMargins(20, 20, 20, 20)
         
         # URL Section
-        url_group = QGroupBox("Playlist URL")
+        url_group = QGroupBox("Video/Playlist URL")
         url_layout = QHBoxLayout()
         
         self.url_entry = QLineEdit()
@@ -59,7 +59,7 @@ class VideoDownloader(QMainWindow):
         path_group.setLayout(path_layout)
         
         # Download Button
-        self.download_btn = QPushButton("Download Playlist")
+        self.download_btn = QPushButton("Download")
         self.download_btn.clicked.connect(self.start_download_thread)
         self.download_btn.setFixedHeight(40)
         
@@ -179,6 +179,26 @@ class VideoDownloader(QMainWindow):
             
     def sanitize_filename(self, name):
         return re.sub(r'[^a-zA-Z0-9-_ ]', '_', name)
+
+    def check_url_type(self, url):
+        """
+        Check if the URL is for a single video or a playlist
+        Returns: tuple of (url_type, info)
+        """
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'extract_flat': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                if 'entries' in info:  # It's a playlist
+                    return 'playlist', info
+                else:  # It's a single video
+                    return 'video', info
+        except Exception as e:
+            return 'error', str(e)
         
     def start_download_thread(self):
         self.download_btn.setEnabled(False)
@@ -188,69 +208,92 @@ class VideoDownloader(QMainWindow):
         thread = threading.Thread(target=self.download_playlist)
         thread.daemon = True
         thread.start()
+
+    def download_single_video(self, video_url, save_path, index=1, total=1):
+        """
+        Helper function to download a single video
+        """
+        try:
+            # Get video info
+            with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+                video_info = ydl.extract_info(video_url, download=False)
+                
+            video_title = self.sanitize_filename(video_info.get('title', f'video_{index}'))
+            self.status_signal.emit(f"Downloading video {index}/{total}: {video_title}")
+            self.video_info_signal.emit(video_info)
+            
+            # Download options
+            ydl_opts = {
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
+                'outtmpl': os.path.join(save_path, f'{video_title}.%(ext)s'),
+                'progress_hooks': [self.progress_hook],
+                'quiet': True,
+            }
+            
+            # Download the video
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([video_url])
+                
+        except Exception as e:
+            self.status_signal.emit(f"Failed to download video {index}: {str(e)}")
+            raise
         
     def download_playlist(self):
-        playlist_url = self.url_entry.text().strip()
+        url = self.url_entry.text().strip()
         save_path = self.path_entry.text().strip()
         
-        if not playlist_url:
-            self.status_signal.emit("Please enter a playlist URL.")
+        if not url:
+            self.status_signal.emit("Please enter a URL.")
             self.download_btn.setEnabled(True)
             return
             
         if not save_path:
             save_path = os.getcwd()
             
-        self.status_signal.emit("Fetching playlist details...")
+        self.status_signal.emit("Checking URL type...")
+        
+        # Check URL type
+        url_type, info = self.check_url_type(url)
+        
+        if url_type == 'error':
+            self.status_signal.emit(f"Error: {info}")
+            self.download_btn.setEnabled(True)
+            return
         
         try:
-            ydl_opts = {'quiet': True}
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                playlist_info = ydl.extract_info(playlist_url, download=False)
-        except Exception as e:
-            self.status_signal.emit(f"Error fetching playlist: {str(e)}")
-            self.download_btn.setEnabled(True)
-            return
-            
-        if 'entries' not in playlist_info or not playlist_info['entries']:
-            self.status_signal.emit("The playlist is empty or invalid.")
-            self.download_btn.setEnabled(True)
-            return
-            
-        playlist_title = self.sanitize_filename(playlist_info.get('title', 'Playlist'))
-        playlist_folder = os.path.join(save_path, playlist_title)
-        os.makedirs(playlist_folder, exist_ok=True)
-        
-        video_entries = playlist_info['entries']
-        self.video_count = len(video_entries)
-        self.status_signal.emit(f"Found {self.video_count} videos. Starting download...")
-        
-        for index, entry in enumerate(video_entries, start=1):
-            self.current_video_index = index
-            video_id = entry.get('id')
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-            
-            video_title = self.sanitize_filename(entry.get('title', f'video_{index}'))
-            self.status_signal.emit(f"Downloading video {index}/{self.video_count}: {video_title}")
-            self.video_info_signal.emit(entry)
-            
-            ydl_opts = {
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]',
-                'outtmpl': os.path.join(playlist_folder, f'{video_title}.%(ext)s'),
-                'progress_hooks': [self.progress_hook],
-                'quiet': True,
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                try:
-                    ydl.download([video_url])
-                except Exception as e:
-                    self.status_signal.emit(f"Failed to download video {index}: {str(e)}")
+            if url_type == 'playlist':
+                # Download playlist
+                playlist_title = self.sanitize_filename(info.get('title', 'Playlist'))
+                download_path = os.path.join(save_path, playlist_title)
+                os.makedirs(download_path, exist_ok=True)
+                
+                video_entries = info['entries']
+                self.video_count = len(video_entries)
+                self.status_signal.emit(f"Found {self.video_count} videos in playlist. Starting download...")
+                
+                for index, entry in enumerate(video_entries, start=1):
+                    self.current_video_index = index
+                    video_id = entry.get('id')
+                    video_url = f"https://www.youtube.com/watch?v={video_id}"
                     
-        self.status_signal.emit("All videos have been downloaded successfully!")
-        self.progress_bar.hide()
-        self.video_info_widget.hide()
-        self.download_btn.setEnabled(True)
+                    self.download_single_video(video_url, download_path, index, self.video_count)
+                    
+            else:  # video
+                # Download single video
+                self.video_count = 1
+                self.current_video_index = 1
+                self.status_signal.emit("Downloading single video...")
+                self.download_single_video(url, save_path, 1, 1)
+                
+            self.status_signal.emit("Download completed successfully!")
+            self.progress_bar.hide()
+            self.video_info_widget.hide()
+            
+        except Exception as e:
+            self.status_signal.emit(f"Error during download: {str(e)}")
+        
+        finally:
+            self.download_btn.setEnabled(True)
         
     def progress_hook(self, d):
         if d['status'] == 'downloading':
